@@ -2,13 +2,15 @@ import warnings
 warnings.filterwarnings('ignore')
 
 import streamlit as st
-import textract
 from phi.agent import Agent
 from phi.model.google import Gemini
 import google.generativeai as genai
 from dotenv import load_dotenv
 import os
 import tempfile
+import PyPDF2
+from docx import Document
+import io
 
 # Load environment variables
 load_dotenv()
@@ -77,6 +79,37 @@ def extract_key_info(text):
     """
     return doc_agent.run(extraction_prompt)
 
+def extract_text_from_pdf(file_obj):
+    pdf_reader = PyPDF2.PdfReader(file_obj)
+    text = ""
+    for page in pdf_reader.pages:
+        text += page.extract_text() + "\n"
+    return text
+
+def extract_text_from_docx(file_obj):
+    doc = Document(file_obj)
+    text = ""
+    for paragraph in doc.paragraphs:
+        text += paragraph.text + "\n"
+    return text
+
+def extract_text_from_file(uploaded_file):
+    file_extension = uploaded_file.name.split('.')[-1].lower()
+    
+    try:
+        if file_extension == 'pdf':
+            return extract_text_from_pdf(uploaded_file)
+        elif file_extension in ['docx', 'doc']:
+            return extract_text_from_docx(uploaded_file)
+        elif file_extension == 'txt':
+            return uploaded_file.getvalue().decode('utf-8')
+        else:
+            st.error(f"Unsupported file format: {file_extension}")
+            return None
+    except Exception as e:
+        st.error(f"Error processing {file_extension.upper()} file: {str(e)}")
+        return None
+
 # File uploader
 document_file = st.file_uploader(
     "Upload a document file",
@@ -85,14 +118,13 @@ document_file = st.file_uploader(
 )
 
 if document_file:
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.' + document_file.name.split('.')[-1]) as temp_doc:
-        temp_doc.write(document_file.read())
-        doc_path = temp_doc.name
-
     try:
         # Extract text from the document
-        extracted_text = textract.process(doc_path).decode('utf-8')
+        extracted_text = extract_text_from_file(document_file)
         
+        if extracted_text is None:
+            st.stop()
+            
         # Create tabs for different analysis options
         tab1, tab2, tab3 = st.tabs(["📝 Summary", "🔍 Key Information", "❓ Q&A"])
         
@@ -159,9 +191,6 @@ if document_file:
 
     except Exception as error:
         st.error(f"An error occurred during analysis: {error}")
-    finally:
-        # Clean up temporary document file
-        os.remove(doc_path)
 else:
     st.info("Upload a document file (PDF, DOCX, or TXT) to begin analysis.")
 
