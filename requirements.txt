@@ -10,9 +10,9 @@ openai
 sqlalchemy
 pgvector
 psycopg[binary]
-pypdf
+PyPDF2
 streamlit
 phidata
 google-generativeai
 duckduckgo-search
-textract
+python-docx
