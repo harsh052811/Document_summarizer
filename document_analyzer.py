@@ -36,7 +36,7 @@ st.header("Powered by Google Gemini")
 def get_agent():
     return Agent(
         name="Document AI Analyzer",
-        model=Gemini(id="gemini-pro"),
+        model=Gemini(id="gemini-1.5-pro"),
         markdown=True,
     )
 
