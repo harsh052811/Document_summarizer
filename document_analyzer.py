@@ -20,7 +20,7 @@ import pickle
 from googleapiclient.http import MediaIoBaseDownload
 
 # Load environment variables
-load_dotenv()
+# load_dotenv()
 
 # Configure Google API
 API_KEY = os.getenv("GOOGLE_API_KEY")
@@ -113,7 +113,7 @@ def get_gdrive_service_from_secrets():
         st.error(f"Error setting up Drive service from secrets: {e}")
         return None
 
-# def get_gdrive_service(): # Comment out this entire function
+# def get_gdrive_service():
 #     """Get Google Drive service using local credential files"""
 #     # OPTION 1: Using service account (recommended for production)
 #     try:
@@ -149,7 +149,6 @@ def get_gdrive_service_from_secrets():
 
 #     return build('drive', 'v3', credentials=creds)
 
-
 def find_testing_folder(service):
     """Find the 'testing' folder in Google Drive"""
     query = f"name='{TESTING_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder'"
@@ -165,7 +164,6 @@ def find_testing_folder(service):
 
     # Return the first matching folder
     return folders[0]['id']
-
 
 def list_files_in_folder(service, folder_id, mime_types=None):
     """List files from a specific folder in Google Drive with optional MIME type filtering"""
@@ -184,7 +182,6 @@ def list_files_in_folder(service, folder_id, mime_types=None):
 
     return results.get('files', [])
 
-
 def download_file(service, file_id):
     """Download a file from Google Drive by its ID"""
     request = service.files().get_media(fileId=file_id)
@@ -198,14 +195,12 @@ def download_file(service, file_id):
     file_content.seek(0)
     return file_content
 
-
 def get_agent():
     return Agent(
         name="Document Chat Assistant",
         model=Gemini(id="gemini-1.5-pro"),
         markdown=True,
     )
-
 
 def extract_text_from_pdf(file_obj):
     pdf_reader = PyPDF2.PdfReader(file_obj)
@@ -214,14 +209,12 @@ def extract_text_from_pdf(file_obj):
         text += page.extract_text() + "\n"
     return text
 
-
 def extract_text_from_docx(file_obj):
     doc = Document(file_obj)
     text = ""
     for paragraph in doc.paragraphs:
         text += paragraph.text + "\n"
     return text
-
 
 def extract_text_from_file(file_obj, mime_type):
     try:
@@ -238,7 +231,6 @@ def extract_text_from_file(file_obj, mime_type):
         st.error(f"Error processing file: {str(e)}")
         return None
 
-
 # Initialize session state
 if 'messages' not in st.session_state:
     st.session_state.messages = []
@@ -248,15 +240,14 @@ if 'processing_query' not in st.session_state:
 
 if 'drive_service' not in st.session_state:
     try:
-        # Try secrets first
-        st.session_state.drive_service = get_gdrive_service_from_secrets()
+        # Try secrets first, then fall back to file-based authentication
+        st.session_state.drive_service = get_gdrive_service_from_secrets() # or get_gdrive_service() #GET RID OF get_gdrive_service
         if not st.session_state.drive_service:
             st.error("Could not connect to Google Drive")
             st.stop()
     except Exception as e:
         st.error(f"Error connecting to Google Drive: {str(e)}")
-        st.info(
-            "Please ensure you have credentials.json or service_account.json file with proper Google Drive API credentials")
+        st.info("Please ensure you have credentials.json or service_account.json file with proper Google Drive API credentials")
         st.stop()
 
 # Find the testing folder
@@ -267,8 +258,7 @@ if 'testing_folder_id' not in st.session_state:
             st.session_state.testing_folder_id = folder_id
         else:
             st.error(f"Folder '{TESTING_FOLDER_NAME}' not found in your Google Drive")
-            st.info(
-                f"Please create a folder named '{TESTING_FOLDER_NAME}' in your Google Drive and upload your documents there")
+            st.info(f"Please create a folder named '{TESTING_FOLDER_NAME}' in your Google Drive and upload your documents there")
             st.stop()
     except Exception as e:
         st.error(f"Error finding the testing folder: {str(e)}")
@@ -291,12 +281,10 @@ with st.sidebar:
     ]
 
     try:
-        files = list_files_in_folder(st.session_state.drive_service, st.session_state.testing_folder_id,
-                                     supported_mime_types)
+        files = list_files_in_folder(st.session_state.drive_service, st.session_state.testing_folder_id, supported_mime_types)
 
         if not files:
-            st.info(
-                f"No compatible documents found in your '{TESTING_FOLDER_NAME}' folder. Please upload PDF, DOCX, or TXT files to this folder.")
+            st.info(f"No compatible documents found in your '{TESTING_FOLDER_NAME}' folder. Please upload PDF, DOCX, or TXT files to this folder.")
         else:
             file_options = {f"{file['name']}": file for file in files}
             selected_file_option = st.selectbox("Choose a document", options=list(file_options.keys()))
@@ -350,8 +338,7 @@ if 'current_text' in st.session_state:
     # User input
     # Create a form to better control submission
     with st.form(key="question_form", clear_on_submit=True):
-        user_input = st.text_input("Type your question here", key="user_input",
-                                  placeholder="What would you like to know about this document?")
+        user_input = st.text_input("Type your question here", key="user_input", placeholder="What would you like to know about this document?")
         submit_button = st.form_submit_button("Send")
 
     # Handle form submission
@@ -365,7 +352,7 @@ if 'current_text' in st.session_state:
         # Generate response
         with st.spinner("Thinking..."):
             qa_prompt = f"""
-            You are a friendly and helpful customer service representative responding to questions about a business document. 
+            You are a friendly and helpful customer service representative responding to questions about a business document.
             Your tone should be conversational, helpful, and professional.
 
             Document: {st.session_state.current_document}
