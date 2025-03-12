@@ -7,10 +7,15 @@ from phi.model.google import Gemini
 import google.generativeai as genai
 from dotenv import load_dotenv
 import os
-import tempfile
 import PyPDF2
 from docx import Document
 import io
+from googleapiclient.discovery import build
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+import pickle
+from googleapiclient.http import MediaIoBaseDownload
 
 # Load environment variables
 load_dotenv()
@@ -25,59 +30,144 @@ else:
 
 # Page configuration
 st.set_page_config(
-    page_title="Document Analysis & QA System",
-    page_icon="📄",
+    page_title="Document Chat Assistant",
+    page_icon="💬",
     layout="wide"
 )
 
-st.title("Document Analysis & QA System 📄🔍")
-st.header("Powered by Google Gemini")
+# Style and branding
+st.markdown(
+    """
+    <style>
+    .main-header {
+        color: #2E4057;
+        font-size: 2.5rem;
+    }
+    .chat-message {
+        padding: 1.5rem;
+        border-radius: 0.8rem;
+        margin-bottom: 1rem;
+        display: flex;
+        flex-direction: row;
+        align-items: flex-start;
+        gap: 0.75rem;
+    }
+    .user-message {
+        background-color: #F0F2F6;
+    }
+    .assistant-message {
+        background-color: #E8F0FE;
+    }
+    .message-content {
+        width: 90%;
+    }
+    .avatar {
+        width: 35px;
+        height: 35px;
+        border-radius: 50%;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        font-size: 16px;
+        font-weight: bold;
+    }
+    .user-avatar {
+        background-color: #4B9CD3;
+        color: white;
+    }
+    .assistant-avatar {
+        background-color: #13B287;
+        color: white;
+    }
+    .stTextInput>div>div>input {
+        padding: 0.75rem;
+        font-size: 1rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+st.markdown('<h1 class="main-header">Document Chat Assistant</h1>', unsafe_allow_html=True)
+
+# Google Drive API setup
+SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
+TESTING_FOLDER_NAME = "testing"  # The specific folder to search in
+
+def get_gdrive_service():
+    creds = None
+    # The file token.pickle stores the user's access and refresh tokens
+    if os.path.exists('token.pickle'):
+        with open('token.pickle', 'rb') as token:
+            creds = pickle.load(token)
+    
+    # If credentials don't exist or are invalid, let the user log in
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(
+                'credentials.json', SCOPES)
+            creds = flow.run_local_server(port=0)
+        
+        # Save the credentials for the next run
+        with open('token.pickle', 'wb') as token:
+            pickle.dump(creds, token)
+    
+    return build('drive', 'v3', credentials=creds)
+
+def find_testing_folder(service):
+    """Find the 'testing' folder in Google Drive"""
+    query = f"name='{TESTING_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder'"
+    results = service.files().list(
+        q=query,
+        spaces='drive',
+        fields="files(id, name)"
+    ).execute()
+    
+    folders = results.get('files', [])
+    if not folders:
+        return None
+    
+    # Return the first matching folder
+    return folders[0]['id']
+
+def list_files_in_folder(service, folder_id, mime_types=None):
+    """List files from a specific folder in Google Drive with optional MIME type filtering"""
+    query = f"'{folder_id}' in parents"
+    
+    if mime_types:
+        mime_query_parts = [f"mimeType='{mime_type}'" for mime_type in mime_types]
+        mime_query = " or ".join(mime_query_parts)
+        query += f" and ({mime_query})"
+    
+    results = service.files().list(
+        q=query,
+        pageSize=30,
+        fields="nextPageToken, files(id, name, mimeType)"
+    ).execute()
+    
+    return results.get('files', [])
+
+def download_file(service, file_id):
+    """Download a file from Google Drive by its ID"""
+    request = service.files().get_media(fileId=file_id)
+    file_content = io.BytesIO()
+    downloader = MediaIoBaseDownload(file_content, request)
+    done = False
+    
+    while not done:
+        status, done = downloader.next_chunk()
+    
+    file_content.seek(0)
+    return file_content
 
 def get_agent():
     return Agent(
-        name="Document AI Analyzer",
+        name="Document Chat Assistant",
         model=Gemini(id="gemini-1.5-pro"),
         markdown=True,
     )
-
-# Initialize the agent
-doc_agent = get_agent()
-
-# Function to generate summary
-def generate_summary(text):
-    summary_prompt = f"""
-    You are a professional document analyzer. Please provide a comprehensive summary of the following document:
-    
-    {text}
-    
-    Include:
-    1. Main topics and key points
-    2. Important findings or conclusions
-    3. Key takeaways
-    
-    Format the response in a clear, structured manner using markdown.
-    Make sure to highlight the most important information.
-    """
-    return doc_agent.run(summary_prompt)
-
-# Function to extract key information
-def extract_key_info(text):
-    extraction_prompt = f"""
-    You are a professional information extractor. Analyze the following document and extract key information:
-    
-    {text}
-    
-    Please provide:
-    1. Key entities mentioned
-    2. Important dates and numbers
-    3. Critical facts and findings
-    4. Main arguments or points
-    5. Any notable quotes
-    
-    Format the response in a well-structured manner using markdown.
-    Make sure to categorize and organize the information clearly.
-    """
-    return doc_agent.run(extraction_prompt)
 
 def extract_text_from_pdf(file_obj):
     pdf_reader = PyPDF2.PdfReader(file_obj)
@@ -93,118 +183,169 @@ def extract_text_from_docx(file_obj):
         text += paragraph.text + "\n"
     return text
 
-def extract_text_from_file(uploaded_file):
-    file_extension = uploaded_file.name.split('.')[-1].lower()
-    
+def extract_text_from_file(file_obj, mime_type):
     try:
-        if file_extension == 'pdf':
-            return extract_text_from_pdf(uploaded_file)
-        elif file_extension in ['docx', 'doc']:
-            return extract_text_from_docx(uploaded_file)
-        elif file_extension == 'txt':
-            return uploaded_file.getvalue().decode('utf-8')
+        if 'pdf' in mime_type:
+            return extract_text_from_pdf(file_obj)
+        elif 'document' in mime_type or 'docx' in mime_type:
+            return extract_text_from_docx(file_obj)
+        elif 'text/plain' in mime_type:
+            return file_obj.getvalue().decode('utf-8')
         else:
-            st.error(f"Unsupported file format: {file_extension}")
+            st.error(f"Unsupported file format: {mime_type}")
             return None
     except Exception as e:
-        st.error(f"Error processing {file_extension.upper()} file: {str(e)}")
+        st.error(f"Error processing file: {str(e)}")
         return None
 
-# File uploader
-document_file = st.file_uploader(
-    "Upload a document file",
-    type=['pdf', 'docx', 'txt'],
-    help="Upload a document for AI analysis"
-)
+# Initialize session state
+if 'messages' not in st.session_state:
+    st.session_state.messages = []
 
-if document_file:
+if 'processing_query' not in st.session_state:
+    st.session_state.processing_query = False
+
+if 'drive_service' not in st.session_state:
     try:
-        # Extract text from the document
-        extracted_text = extract_text_from_file(document_file)
-        
-        if extracted_text is None:
+        st.session_state.drive_service = get_gdrive_service()
+    except Exception as e:
+        st.error(f"Error connecting to Google Drive: {str(e)}")
+        st.info("Please ensure you have credentials.json file with proper Google Drive API credentials")
+        st.stop()
+
+# Find the testing folder
+if 'testing_folder_id' not in st.session_state:
+    try:
+        folder_id = find_testing_folder(st.session_state.drive_service)
+        if folder_id:
+            st.session_state.testing_folder_id = folder_id
+        else:
+            st.error(f"Folder '{TESTING_FOLDER_NAME}' not found in your Google Drive")
+            st.info(f"Please create a folder named '{TESTING_FOLDER_NAME}' in your Google Drive and upload your documents there")
             st.stop()
-            
-        # Create tabs for different analysis options
-        tab1, tab2, tab3 = st.tabs(["📝 Summary", "🔍 Key Information", "❓ Q&A"])
+    except Exception as e:
+        st.error(f"Error finding the testing folder: {str(e)}")
+        st.stop()
+
+# Initialize the agent
+doc_agent = get_agent()
+
+# Sidebar for document selection
+with st.sidebar:
+    st.header("Select Document")
+    st.markdown(f"Files from your '{TESTING_FOLDER_NAME}' folder:")
+    
+    # Define supported file types
+    supported_mime_types = [
+        'application/pdf',
+        'application/vnd.google-apps.document',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'text/plain'
+    ]
+    
+    try:
+        files = list_files_in_folder(st.session_state.drive_service, st.session_state.testing_folder_id, supported_mime_types)
         
-        with tab1:
-            st.subheader("Document Summary")
-            if st.button("Generate Summary"):
-                with st.spinner("Generating comprehensive summary..."):
-                    summary_response = generate_summary(extracted_text)
-                    st.markdown(summary_response.content)
-
-        with tab2:
-            st.subheader("Key Information Extraction")
-            if st.button("Extract Key Information"):
-                with st.spinner("Extracting key information..."):
-                    key_info_response = extract_key_info(extracted_text)
-                    st.markdown(key_info_response.content)
-
-        with tab3:
-            st.subheader("Ask Questions")
-            user_question = st.text_area(
-                "Ask a question about the document",
-                placeholder="Enter your question here...",
-                help="Ask specific questions about the document content"
-            )
-
-            if st.button("Get Answer"):
-                if not user_question:
-                    st.warning("Please enter a question.")
-                else:
-                    with st.spinner("Finding answer..."):
-                        qa_prompt = f"""
-                        You are an expert document analyst. Your task is to answer questions about the following document content accurately and comprehensively.
-
-                        Document Content:
-                        ```
-                        {extracted_text}
-                        ```
-
-                        Question: {user_question}
-
-                        Instructions:
-                        1. Provide a clear and direct answer to the question
-                        2. Support your answer with relevant quotes or references from the document
-                        3. If the question cannot be answered from the document content, clearly state that
-                        4. If you need to make assumptions, explicitly state them
-                        5. Format your response in markdown for better readability
-
-                        Response format:
-                        - Answer: [Your detailed answer]
-                        - Supporting Evidence: [Relevant quotes or references from the document]
-                        - Additional Context: [Any important context or clarifications]
-                        """
-                        qa_response = doc_agent.run(qa_prompt)
+        if not files:
+            st.info(f"No compatible documents found in your '{TESTING_FOLDER_NAME}' folder. Please upload PDF, DOCX, or TXT files to this folder.")
+        else:
+            file_options = {f"{file['name']}": file for file in files}
+            selected_file_option = st.selectbox("Choose a document", options=list(file_options.keys()))
+            selected_file = file_options[selected_file_option]
+            
+            if st.button("Open Selected Document"):
+                with st.spinner(f"Loading {selected_file['name']}..."):
+                    file_content = download_file(st.session_state.drive_service, selected_file['id'])
+                    extracted_text = extract_text_from_file(file_content, selected_file['mimeType'])
+                    
+                    if extracted_text:
+                        st.session_state.current_text = extracted_text
+                        st.session_state.current_document = selected_file['name']
+                        st.session_state.messages = []  # Clear the chat when loading a new document
                         
-                        # Add a separator for better readability
-                        st.markdown("---")
-                        st.markdown("### Answer:")
-                        st.markdown(qa_response.content)
+                        # Add a welcome message
+                        welcome_message = {
+                            "role": "assistant", 
+                            "content": f"👋 Hi there! I'm your document assistant for *{selected_file['name']}*. How can I help you with this document today?"
+                        }
+                        st.session_state.messages.append(welcome_message)
+                        st.success(f"Document loaded! You can now ask questions about it.")
+                    else:
+                        st.error("Failed to extract text from the selected document")
+    except Exception as e:
+        st.error(f"Error accessing Google Drive: {str(e)}")
 
-                        # Option to see relevant text
-                        if st.checkbox("Show document context"):
-                            st.markdown("### Document Content:")
-                            st.text_area("", value=extracted_text, height=200, disabled=True)
+# Main chat interface
+if 'current_text' in st.session_state:
+    st.subheader(f"Chat about: {st.session_state.current_document}")
+    
+    # Display chat messages
+    for message in st.session_state.messages:
+        if message["role"] == "user":
+            with st.container():
+                st.markdown(f"""
+                <div class="chat-message user-message">
+                    <div class="avatar user-avatar">👤</div>
+                    <div class="message-content">{message["content"]}</div>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            with st.container():
+                st.markdown(f"""
+                <div class="chat-message assistant-message">
+                    <div class="avatar assistant-avatar">💬</div>
+                    <div class="message-content">{message["content"]}</div>
+                </div>
+                """, unsafe_allow_html=True)
+    
+    # User input
+    # Create a form to better control submission
+    with st.form(key="question_form", clear_on_submit=True):
+        user_input = st.text_input("Type your question here", key="user_input", placeholder="What would you like to know about this document?")
+        submit_button = st.form_submit_button("Send")
+    
+    # Handle form submission
+    if submit_button and user_input and not st.session_state.processing_query:
+        # Set processing flag to prevent multiple runs
+        st.session_state.processing_query = True
+        
+        # Add user message to chat
+        st.session_state.messages.append({"role": "user", "content": user_input})
+        
+        # Generate response
+        with st.spinner("Thinking..."):
+            qa_prompt = f"""
+            You are a friendly and helpful customer service representative responding to questions about a business document. 
+            Your tone should be conversational, helpful, and professional.
 
-    except Exception as error:
-        st.error(f"An error occurred during analysis: {error}")
+            Document: {st.session_state.current_document}
+            Document Content:
+            ```
+            {st.session_state.current_text}
+            ```
+
+            Question: {user_input}
+
+            Instructions:
+            1. Respond in a warm, conversational customer service tone
+            2. Provide a helpful, well-structured answer without citing evidence or references
+            3. Use natural language as if you were chatting with a customer in real-time
+            4. If you can't answer from the document, politely explain what information is available
+            5. DO NOT include "Supporting Evidence" or reference quotes from the document
+            6. DO NOT use phrases like "Based on the document" or "According to the document"
+            7. Format your response with appropriate markdown where helpful
+
+            Your response should feel like a natural conversation with a friendly customer service representative.
+            """
+            
+            response = doc_agent.run(qa_prompt)
+            
+            # Add assistant response to chat
+            st.session_state.messages.append({"role": "assistant", "content": response.content})
+        
+        # Reset processing flag and trigger rerun
+        st.session_state.processing_query = False
+        st.rerun()
+
 else:
-    st.info("Upload a document file (PDF, DOCX, or TXT) to begin analysis.")
-
-# Customize UI elements
-st.markdown(
-    """
-    <style>
-    .stTextArea textarea {
-        height: 100px;
-    }
-    .stTab {
-        font-size: 1.2rem;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+    st.info("👈 Please select a document from the sidebar to start chatting")
