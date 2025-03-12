@@ -6,21 +6,21 @@ import streamlit as st
 from phi.agent import Agent
 from phi.model.google import Gemini
 import google.generativeai as genai
-from dotenv import load_dotenv
+# from dotenv import load_dotenv  # Commented out
 import os
 import PyPDF2
 from docx import Document
 import io
 from googleapiclient.discovery import build
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
+# from google_auth_oauthlib.flow import InstalledAppFlow #Not needed
+# from google.auth.transport.requests import Request #Not needed
+# from google.oauth2.credentials import Credentials #Not needed
 from google.oauth2 import service_account
 import pickle
 from googleapiclient.http import MediaIoBaseDownload
 
 # Load environment variables
-# load_dotenv()
+# load_dotenv() #Commented Out
 
 # Configure Google API
 API_KEY = os.getenv("GOOGLE_API_KEY")
@@ -68,7 +68,7 @@ st.markdown(
         height: 35px;
         border-radius: 50%;
         display: flex;
-        justify-content: center;
+        justify-content: center,
         align-items: center;
         font-size: 16px;
         font-weight: bold;
@@ -113,6 +113,7 @@ def get_gdrive_service_from_secrets():
         st.error(f"Error setting up Drive service from secrets: {e}")
         return None
 
+# REMOVE THIS FUNCTION COMPLETELY
 # def get_gdrive_service():
 #     """Get Google Drive service using local credential files"""
 #     # OPTION 1: Using service account (recommended for production)
@@ -124,13 +125,13 @@ def get_gdrive_service_from_secrets():
 #             return build('drive', 'v3', credentials=credentials)
 #     except Exception as e:
 #         st.warning(f"Service account authentication failed: {e}")
-
+#
 #     # OPTION 2: Fall back to user authentication flow (current implementation)
 #     creds = None
 #     if os.path.exists('token.pickle'):
 #         with open('token.pickle', 'rb') as token:
 #             creds = pickle.load(token)
-
+#
 #     if not creds or not creds.valid:
 #         if creds and creds.expired and creds.refresh_token:
 #             creds.refresh(Request())
@@ -139,14 +140,14 @@ def get_gdrive_service_from_secrets():
 #             if not os.path.exists('credentials.json'):
 #                 st.error("No credentials found. Please upload credentials.json or service_account.json file.")
 #                 st.stop()
-
+#
 #             flow = InstalledAppFlow.from_client_secrets_file(
 #                 'credentials.json', SCOPES)
 #             creds = flow.run_local_server(port=0)
-
+#
 #         with open('token.pickle', 'wb') as token:
 #             pickle.dump(creds, token)
-
+#
 #     return build('drive', 'v3', credentials=creds)
 
 def find_testing_folder(service):
@@ -240,10 +241,10 @@ if 'processing_query' not in st.session_state:
 
 if 'drive_service' not in st.session_state:
     try:
-        # Try secrets first, then fall back to file-based authentication
+        # Try secrets first
         st.session_state.drive_service = get_gdrive_service_from_secrets() # or get_gdrive_service() #GET RID OF get_gdrive_service
         if not st.session_state.drive_service:
-            st.error("Could not connect to Google Drive")
+            st.error("Could not connect to Google Drive. Check your secrets.")
             st.stop()
     except Exception as e:
         st.error(f"Error connecting to Google Drive: {str(e)}")
