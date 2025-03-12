@@ -16,3 +16,5 @@ phidata
 google-generativeai
 duckduckgo-search
 python-docx
+google-auth-oauthlib
+PyPDF2
